@@ -1,0 +1,84 @@
+version: "3.8"
+
+# =============================================================================
+# P3-SAM API — Docker Compose
+#
+# Quick start (from Hunyuan3D-Part/ directory):
+#   docker compose -f P3-SAM/docker-compose.yml up -d
+#
+# Or from inside P3-SAM/:
+#   docker compose up -d
+#
+# Rebuild after code changes:
+#   docker compose up -d --build
+#
+# Logs:
+#   docker compose logs -f p3sam
+#
+# Check GPU inside container:
+#   docker compose exec p3sam nvidia-smi
+#
+# API docs (Swagger UI):
+#   http://localhost:5001/docs
+# =============================================================================
+
+services:
+  p3sam:
+    build:
+      # Build context is the Hunyuan3D-Part/ parent directory so the Dockerfile
+      # can COPY both P3-SAM/ and XPart/partgen/ into the image.
+      context: ..
+      dockerfile: P3-SAM/Dockerfile
+      args:
+        # sm_120 = RTX Pro 6000 (Blackwell).
+        # Set to just "12.0" to speed up builds targeting only this machine.
+        TORCH_CUDA_ARCH_LIST: "8.0;8.6;8.9;9.0;10.0;12.0"
+        # Parallel compile jobs — increase if build machine has many cores.
+        MAX_JOBS: "4"
+        # Corporate proxy — set if apt/pip/git need to reach the internet
+        # through a proxy. Leave empty if no proxy is needed.
+        http_proxy: ""
+        https_proxy: ""
+        no_proxy: "localhost,127.0.0.1"
+
+    image: p3sam:latest
+    container_name: p3sam-api
+
+    ports:
+      - "5001:5001"
+
+    volumes:
+      # ── Model weight cache ────────────────────────────────────────────────
+      # All weights (P3-SAM safetensors + Sonata) now respect HF_HOME and
+      # land under /root/.cache/huggingface inside the container.
+      # Map this to wherever you keep model weights on the host, e.g.:
+      #   /pegaai/model_team/huggingface_cache  (shared with ReconViaGen)
+      #   ./weights/huggingface                 (local to this project)
+      - /pegaai/model_team/huggingface_cache:/root/.cache/huggingface:rw
+
+      # ── Optional: expose outputs to the host ──────────────────────────────
+      # Uncomment to access generated .glb files directly on the host.
+      # - ./outputs:/tmp:rw
+
+    environment:
+      - SPCONV_ALGO=native
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+      # Optional: set a Hugging Face token if any model repo is gated
+      # - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # Use "all" to expose every GPU, or specify a device:
+              #   device_ids: ["0"]
+              count: 1
+              capabilities: [gpu]
+
+    # Shared memory for PyTorch.
+    # 8 GB is a safe default for large point cloud operations.
+    shm_size: "8gb"
+
+    restart: unless-stopped

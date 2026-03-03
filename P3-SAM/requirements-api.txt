@@ -1,0 +1,41 @@
+# =============================================================================
+# P3-SAM API — Python dependencies
+#
+# The following packages are intentionally NOT listed here and are instead
+# installed directly in the Dockerfile (version-pinning or source build
+# required for CUDA compatibility):
+#
+#   torch / torchvision   — Step 1 (PyTorch cu126 index)
+#   spconv-cu120          — Step 2
+#   torch-scatter         — Step 3 (PyG cu126 index)
+# =============================================================================
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+pydantic==2.10.6
+
+# ── 3D geometry ───────────────────────────────────────────────────────────────
+trimesh==4.5.3
+scipy==1.14.1
+networkx
+
+# ── Point cloud / segmentation ────────────────────────────────────────────────
+fpsample
+numba
+scikit-learn
+
+# ── Sonata feature extractor deps ─────────────────────────────────────────────
+addict
+omegaconf
+packaging
+
+# ── HuggingFace / model loading ───────────────────────────────────────────────
+huggingface_hub==0.33.4
+safetensors
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+numpy==2.1.2
+tqdm
+easydict

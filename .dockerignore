@@ -1,0 +1,42 @@
+# =============================================================================
+# .dockerignore — used when building P3-SAM from the Hunyuan3D-Part/ context
+# =============================================================================
+
+# Large model weights (downloaded at runtime, not baked into image)
+**/*.safetensors
+**/*.ckpt
+**/*.pt
+**/*.bin
+**/*.pth
+
+# Python caches
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.egg-info
+**/.eggs
+**/dist
+**/build
+
+# Dataset / result directories
+data/
+**/results/
+**/outputs/
+
+# Demo assets (not needed for the API)
+P3-SAM/images/
+P3-SAM/demo/assets/
+
+# XPart stuff not needed for P3-SAM inference
+XPart/assets/
+XPart/data/
+
+# Git
+**/.git
+**/.gitignore
+**/.gitmodules
+
+# Misc
+**/.DS_Store
+**/Thumbs.db
+**/*.log
