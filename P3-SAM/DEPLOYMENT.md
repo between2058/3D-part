@@ -97,19 +97,25 @@ docker build \
     .
 ```
 
-### 如果在 corporate proxy 環境
+### Proxy 設定
+
+Proxy 已**預設寫入** `http://proxy.intra:80`（Dockerfile ARG、docker-compose build args、docker-build.sh 三者一致），與 ReconViaGen / qwen-image 相同，無需額外設定。
+
+若需換成其他 proxy：
 
 ```bash
-http_proxy=http://proxy.intra:80 \
-https_proxy=http://proxy.intra:80 \
-./P3-SAM/docker-build.sh
+# docker-build.sh 方式
+http_proxy=http://other-proxy:3128 ./P3-SAM/docker-build.sh
+
+# 手動 docker build 方式
+--build-arg http_proxy="http://other-proxy:3128" \
+--build-arg https_proxy="http://other-proxy:3128"
 ```
 
-或在 `docker build` 加上：
+若完全不需要 proxy（直接連外網）：
 
 ```bash
---build-arg http_proxy="http://proxy.intra:80" \
---build-arg https_proxy="http://proxy.intra:80"
+http_proxy="" https_proxy="" ./P3-SAM/docker-build.sh
 ```
 
 ### Build 各步驟說明

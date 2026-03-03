@@ -34,8 +34,8 @@ ARG TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0;10.0;12.0"
 ARG MAX_JOBS=4
 
 # ── Proxy (build-time + runtime) ──────────────────────────────────────────────
-ARG http_proxy=""
-ARG https_proxy=""
+ARG http_proxy="http://proxy.intra:80"
+ARG https_proxy="http://proxy.intra:80"
 ARG no_proxy="localhost,127.0.0.1"
 
 ENV http_proxy=${http_proxy} \
@@ -62,11 +62,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
 
 # ── apt proxy config ──────────────────────────────────────────────────────────
-RUN if [ -n "${http_proxy}" ]; then \
-      printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' \
-        "${http_proxy}" "${https_proxy}" \
-        > /etc/apt/apt.conf.d/99proxy; \
-    fi
+RUN printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' \
+      "${http_proxy}" "${https_proxy}" \
+      > /etc/apt/apt.conf.d/99proxy
 
 # ── System packages ───────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
