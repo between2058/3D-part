@@ -30,6 +30,7 @@ scikit-learn
 addict
 omegaconf
 packaging
+timm
 
 # ── HuggingFace / model loading ───────────────────────────────────────────────
 huggingface_hub==0.33.4
