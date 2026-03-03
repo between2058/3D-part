@@ -5,7 +5,7 @@
 # CUDA toolkit    : 12.8
 # cuDNN           : 9
 # Python          : 3.10
-# PyTorch         : 2.6.0 + cu126  (first release with native sm_120 support)
+# PyTorch         : 2.7.1 + cu128  (native CUDA 12.8 / sm_120 support)
 #
 # Build context   : Hunyuan3D-Part/ (parent of P3-SAM/)
 # Build:
@@ -97,16 +97,17 @@ RUN update-alternatives --install /usr/bin/python  python  /usr/bin/python3.10 1
 WORKDIR /app
 
 # =============================================================================
-# STEP 1 — PyTorch 2.6 with CUDA 12.6 wheels
+# STEP 1 — PyTorch 2.7.1 with CUDA 12.8 wheels
 #
-# cu126 wheels are forward-compatible with the CUDA 12.8 runtime.
-# PyTorch 2.6 is the first stable release that includes sm_120 (Blackwell)
-# kernels compiled into the distributed binaries.
+# cu128 wheels match the nvcc 12.8 toolchain on the host.
+# Using the native CUDA 12.8 build avoids the ABI mismatch that breaks
+# CUDA extension compilation (chamfer3D, spconv) when cu126 wheels are
+# used against an nvcc 12.8 environment.
 # =============================================================================
 RUN pip install --no-cache-dir \
-    torch==2.6.0 \
-    torchvision==0.21.0 \
-    --index-url https://download.pytorch.org/whl/cu126
+    torch==2.7.1 \
+    torchvision==0.22.1 \
+    --index-url https://download.pytorch.org/whl/cu128
 
 # =============================================================================
 # STEP 2 — spconv
@@ -117,15 +118,15 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir spconv-cu120==2.3.6
 
 # =============================================================================
-# STEP 3 — torch-scatter (PyG)
+# STEP 3 — PyG packages (torch-scatter + extras)
 #
-# Required by the Sonata model (torch_scatter.segment_csr).
-# PyG publishes cu126 wheels; if the index is unavailable for this exact
-# PyTorch/CUDA combination, build from source as a fallback:
-#   pip install git+https://github.com/rusty1s/pytorch_scatter.git
+# torch-scatter is required by the Sonata model (torch_scatter.segment_csr).
+# The full pyg bundle is installed to match the verified local environment.
+# Index URL uses torch-2.7.1+cu128 wheels.
 # =============================================================================
-RUN pip install --no-cache-dir torch-scatter \
-    -f https://data.pyg.org/whl/torch-2.6.0+cu126.html
+RUN pip install --no-cache-dir \
+    pyg-lib torch-scatter torch-sparse torch-cluster torch-spline-conv \
+    -f https://data.pyg.org/whl/torch-2.7.1+cu128.html
 
 # =============================================================================
 # STEP 4 — Pure-Python / non-CUDA packages
