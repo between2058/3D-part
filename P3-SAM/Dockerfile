@@ -129,13 +129,23 @@ RUN pip install --no-cache-dir \
     -f https://data.pyg.org/whl/torch-2.7.1+cu128.html
 
 # =============================================================================
-# STEP 4 — Pure-Python / non-CUDA packages
+# STEP 4 — flash-attention (build from source — expect ~20-40 min)
+#
+# Required by the Sonata feature extractor: enable_flash=True by default,
+# and the attention layer asserts flash_attn is not None at model init time.
+# Must be built against the already-installed torch==2.7.1+cu128.
+# MAX_JOBS controls parallel ninja jobs (set low to avoid OOM during build).
+# =============================================================================
+RUN MAX_JOBS=${MAX_JOBS} pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation
+
+# =============================================================================
+# STEP 5 — Pure-Python / non-CUDA packages
 # =============================================================================
 COPY P3-SAM/requirements-api.txt /app/requirements-api.txt
 RUN pip install --no-cache-dir -r /app/requirements-api.txt
 
 # =============================================================================
-# STEP 5 — Application source code
+# STEP 6 — Application source code
 #
 # Build context is the Hunyuan3D-Part/ parent directory.
 # We copy only what is needed at runtime:
@@ -150,7 +160,7 @@ COPY P3-SAM/utils/   /app/P3-SAM/utils/
 COPY XPart/partgen/  /app/XPart/partgen/
 
 # =============================================================================
-# STEP 6 — Build chamfer3D CUDA extension
+# STEP 7 — Build chamfer3D CUDA extension
 #
 # chamfer3D is a lightweight CUDA kernel used by auto_mask.py.
 # Building here ensures sm_120 kernels are compiled into the extension.

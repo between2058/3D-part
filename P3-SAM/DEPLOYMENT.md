@@ -122,13 +122,14 @@ http_proxy="" https_proxy="" ./P3-SAM/docker-build.sh
 
 | Step | 內容 | 預計時間 |
 |------|------|----------|
-| 1 | PyTorch 2.6.0 + cu126 wheel | 3–5 min |
+| 1 | PyTorch 2.7.1 + cu128 wheel | 3–5 min |
 | 2 | spconv-cu120 | 1 min |
-| 3 | torch-scatter (PyG) | 1–2 min |
-| 4 | Pure Python deps | 3–5 min |
-| 5 | COPY source code | < 1 min |
-| 6 | Build chamfer3D CUDA extension | 2–5 min |
-| **Total** | | **約 15–25 min** |
+| 3 | PyG packages (torch-scatter 等) | 1–2 min |
+| 4 | flash-attn 2.8.3（source build） | **20–40 min** |
+| 5 | Pure Python deps | 3–5 min |
+| 6 | COPY source code | < 1 min |
+| 7 | Build chamfer3D CUDA extension | 2–5 min |
+| **Total** | | **約 35–60 min** |
 
 ---
 
