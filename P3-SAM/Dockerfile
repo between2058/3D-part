@@ -178,7 +178,7 @@ RUN pip install --no-cache-dir --no-build-isolation /app/P3-SAM/utils/chamfer3D
 WORKDIR /app/P3-SAM/demo
 
 # Create cache mount points (weights are downloaded on first request)
-RUN mkdir -p /root/.cache/p3sam /root/sonata /root/.cache/huggingface
+RUN mkdir -p /root/.cache/p3sam /root/sonata /root/.cache/huggingface /app/logs
 
 # ── Port ──────────────────────────────────────────────────────────────────────
 EXPOSE 5001

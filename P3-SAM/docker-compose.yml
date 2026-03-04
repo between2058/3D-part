@@ -55,6 +55,10 @@ services:
       #   ./weights/huggingface                 (local to this project)
       - /pegaai/model_team/huggingface_cache:/root/.cache/huggingface:rw
 
+      # ── Log persistence ───────────────────────────────────────────────────
+      # Logs survive container restarts; rotated daily, kept 14 days.
+      - ./logs:/app/logs
+
       # ── Optional: expose outputs to the host ──────────────────────────────
       # Uncomment to access generated .glb files directly on the host.
       # - ./outputs:/tmp:rw

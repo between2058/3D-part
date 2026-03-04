@@ -172,6 +172,9 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 import uvicorn
 import traceback
+import logging
+import logging.handlers
+import datetime
 
 # Import AutoMask from the provided script
 try:
@@ -179,6 +182,67 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import AutoMask. Dependencies might be missing. Error: {e}")
     AutoMask = None
+
+# ── Logging Setup ──────────────────────────────────────────────────────────────
+
+class TaipeiFormatter(logging.Formatter):
+    """Timestamps always in UTC+8 (Taiwan), independent of system timezone."""
+    _tz = datetime.timezone(datetime.timedelta(hours=8))
+
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.datetime.fromtimestamp(record.created, tz=self._tz)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S") + f",{int(record.msecs):03d}"
+
+
+class HealthCheckFilter(logging.Filter):
+    """Suppress uvicorn.access entries for GET /health (stops healthcheck log spam)."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "GET /health" not in record.getMessage()
+
+
+def _setup_logging() -> logging.Logger:
+    log_dir = "/app/logs"
+    os.makedirs(log_dir, exist_ok=True)
+
+    fmt = TaipeiFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    def _rotating(filename: str) -> logging.handlers.TimedRotatingFileHandler:
+        h = logging.handlers.TimedRotatingFileHandler(
+            os.path.join(log_dir, filename),
+            when="midnight",
+            backupCount=14,
+            encoding="utf-8",
+        )
+        h.setFormatter(fmt)
+        return h
+
+    # app.log — business logic
+    app_log = logging.getLogger("p3sam")
+    app_log.setLevel(logging.DEBUG)
+    app_log.addHandler(_rotating("app.log"))
+
+    # access.log — HTTP requests (health-check entries filtered out)
+    access_log = logging.getLogger("uvicorn.access")
+    access_log.addFilter(HealthCheckFilter())
+    access_log.addHandler(_rotating("access.log"))
+
+    # uvicorn.log — server startup & errors
+    uvicorn_log = logging.getLogger("uvicorn.error")
+    uvicorn_log.addHandler(_rotating("uvicorn.log"))
+
+    return app_log
+
+
+logger = _setup_logging()
+
+
+def log_gpu_memory(label: str) -> None:
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved  = torch.cuda.memory_reserved()  / 1024**3
+        logger.info(f"GPU memory [{label}]: allocated={allocated:.2f} GB  reserved={reserved:.2f} GB")
 
 # --- Response Schemas ---
 
@@ -231,7 +295,8 @@ def load_model_instance(
 
     ckpt_path = None # Set your checkpoint path here
 
-    print(f"🔄 Loading P3SAM model (point_num={point_num}, prompt_num={prompt_num}, threshold={threshold}, post_process={post_process})...")
+    log_gpu_memory("before model load")
+    logger.info(f"Loading P3SAM model (point_num={point_num}, prompt_num={prompt_num}, threshold={threshold}, post_process={post_process})...")
     model = AutoMask(
         ckpt_path=ckpt_path,
         point_num=point_num,
@@ -239,6 +304,7 @@ def load_model_instance(
         threshold=threshold,
         post_process=post_process,
     )
+    log_gpu_memory("model loaded")
     return model
 
 def classify_exception(e: Exception) -> tuple[int, str, str]:
@@ -306,16 +372,17 @@ def release_model_memory(model):
     強制釋放模型佔用的 CPU 和 GPU 記憶體。
     即使清理過程本身發生例外也不會向上拋出，確保 finally 區塊不會二次崩潰。
     """
-    print("🧹 Cleaning up GPU memory...")
+    logger.info("Cleaning up GPU memory...")
     try:
         del model
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
-        print("✨ GPU memory released.")
+        log_gpu_memory("after flush")
+        logger.info("GPU memory released.")
     except Exception as cleanup_err:
-        print(f"⚠️ GPU memory cleanup failed (non-critical): {type(cleanup_err).__name__}: {cleanup_err}")
+        logger.warning(f"GPU memory cleanup failed (non-critical): {type(cleanup_err).__name__}: {cleanup_err}")
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -371,7 +438,7 @@ async def segment_3d(
 
         # 4. 執行預測 (Inference)
         set_seed(seed)  # 全局設定隨機種子
-        print("✅ P3SAM model Start do segmentation.")
+        logger.info("P3SAM model start segmentation.")
         aabb, face_ids, final_mesh = await run_in_threadpool(
             model.predict_aabb,
             mesh,
@@ -382,7 +449,7 @@ async def segment_3d(
             seed=seed,
             prompt_bs=prompt_bs,
         )
-        print("✅ Segmentation Done")
+        logger.info("Segmentation done.")
 
         # 5. 根據 face_ids 上色並匯出 GLB
         unique_ids = np.unique(face_ids)
@@ -408,7 +475,7 @@ async def segment_3d(
 
     except Exception as e:
         status, error_code, message = classify_exception(e)
-        print(f"❌ [{error_code}] request_id={request_id} | {type(e).__name__}: {e}")
+        logger.error(f"[{error_code}] request_id={request_id} | {type(e).__name__}: {e}")
         traceback.print_exc()
         headers = {"Retry-After": "30"} if status == 503 else {}
         raise HTTPException(
