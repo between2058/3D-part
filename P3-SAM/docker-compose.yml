@@ -65,6 +65,9 @@ services:
       - SPCONV_ALGO=native
       - HF_HOME=/root/.cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface
+      # GPU 選擇：設定 GPU_ID 在 .env 裡（預設 GPU 0）
+      # 單顆：GPU_ID=0   雙顆：GPU_ID=0,1   全部：GPU_ID=all
+      - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-0}
       # Optional: set a Hugging Face token if any model repo is gated
       # - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
 
@@ -73,9 +76,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              # Use "all" to expose every GPU, or specify a device:
-              #   device_ids: ["0"]
-              count: 1
+              count: all        # 讓 runtime 看到所有 GPU，由 NVIDIA_VISIBLE_DEVICES 過濾
               capabilities: [gpu]
 
     # Shared memory for PyTorch.
