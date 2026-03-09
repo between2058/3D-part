@@ -254,6 +254,7 @@ class SegmentResponse(BaseModel):
     segmented_glb: str = Field(description="分割結果 GLB 的下載路徑，傳入 GET /download/{request_id}/{file_name}")
     request_id: str = Field(description="此次請求的 UUID")
     num_parts: int = Field(description="偵測到的零件數量（face label >= 0 的唯一 ID 數）")
+    texture_preserved: bool = Field(description="True=輸入有 UV texture 且已保留；False=以隨機顏色區分各 part")
 
 app = FastAPI(title="P3-SAM 3D Segmentation API")
 
@@ -425,8 +426,24 @@ async def segment_3d(
         with open(input_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # 2. 載入 Mesh (process=False 與官方 demo 一致，避免預處理改變結果)
-        mesh = trimesh.load(input_path, force='mesh', process=False)
+        # 2. 載入 Mesh，保留完整 visual（UV / texture）
+        _loaded = trimesh.load(input_path, process=False)
+        if isinstance(_loaded, trimesh.Scene):
+            # Scene（多 submesh）→ 合併成單一 Trimesh，盡量保留 UV
+            mesh = _loaded.dump(concatenate=True)
+        else:
+            mesh = _loaded
+
+        # 偵測 UV texture
+        has_texture = isinstance(mesh.visual, trimesh.visual.texture.TextureVisuals)
+
+        # 有 texture 時強制 clean_mesh=False：
+        # auto_mask.py:775 用 trimesh.Trimesh(vertices, faces) 重建 mesh 會丟掉 UV，
+        # 必須跳過那個路徑才能在 inference 後還能做 submesh 分割並保留 UV。
+        effective_clean_mesh = clean_mesh
+        if has_texture and clean_mesh:
+            effective_clean_mesh = False
+            logger.info("Input mesh has UV texture — forcing clean_mesh=False to preserve UVs.")
 
         # 3. 載入模型 (Load)
         model = load_model_instance(
@@ -445,33 +462,50 @@ async def segment_3d(
             save_path=job_dir,
             save_mid_res=False,
             show_info=True,
-            clean_mesh_flag=clean_mesh,
+            clean_mesh_flag=effective_clean_mesh,
             seed=seed,
             prompt_bs=prompt_bs,
             is_parallel=False,  # DataParallel 在容器/K8s 環境 NCCL P2P 被封鎖會 hang 300s
         )
         logger.info("Segmentation done.")
 
-        # 5. 根據 face_ids 上色並匯出 GLB
+        # 5. 依 face_ids 分割並匯出 GLB
         unique_ids = np.unique(face_ids)
-        color_map = {
-            i: (np.random.rand(3) * 255).astype(np.uint8)
-            for i in unique_ids if i >= 0
-        }
-        face_colors = np.array(
-            [color_map[fid] if fid >= 0 else [0, 0, 0] for fid in face_ids],
-            dtype=np.uint8,
-        )
-        mesh_out = final_mesh.copy()
-        mesh_out.visual.face_colors = face_colors
-        mesh_out.export(output_glb_path)
+        part_ids = [int(uid) for uid in unique_ids if uid >= 0]
+        num_parts = len(part_ids)
 
-        num_parts = int(np.sum(unique_ids >= 0))
+        if has_texture:
+            # ── Texture 保留模式 ──────────────────────────────────────────
+            # final_mesh 是 clean_mesh=False 路徑下的原始 mesh（UV 完好），
+            # 對每個 part 用 submesh() 切出子網格，UV 座標跟著重新 index。
+            scene = trimesh.Scene()
+            for part_id in part_ids:
+                face_mask = np.where(face_ids == part_id)[0]
+                sub = final_mesh.submesh([face_mask], append=True)
+                scene.add_geometry(sub, node_name=f"part_{part_id}")
+            scene.export(output_glb_path)
+            logger.info(f"Exported {num_parts} textured parts (UV preserved).")
+        else:
+            # ── 無 texture：隨機顏色區分各 part ─────────────────────────
+            rng = np.random.default_rng(seed)
+            color_map = {
+                uid: rng.integers(30, 230, size=3, dtype=np.uint8)
+                for uid in part_ids
+            }
+            face_colors = np.array(
+                [color_map[fid] if fid >= 0 else [64, 64, 64] for fid in face_ids],
+                dtype=np.uint8,
+            )
+            mesh_out = final_mesh.copy()
+            mesh_out.visual.face_colors = face_colors
+            mesh_out.export(output_glb_path)
+            logger.info(f"Exported {num_parts} color-coded parts (no texture).")
 
         return {
             "segmented_glb": f"/download/{request_id}/segmented_output_parts.glb",
             "request_id": request_id,
             "num_parts": num_parts,
+            "texture_preserved": has_texture,
         }
 
     except Exception as e:
