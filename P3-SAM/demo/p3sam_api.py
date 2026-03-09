@@ -448,6 +448,7 @@ async def segment_3d(
             clean_mesh_flag=clean_mesh,
             seed=seed,
             prompt_bs=prompt_bs,
+            is_parallel=False,  # DataParallel 在容器/K8s 環境 NCCL P2P 被封鎖會 hang 300s
         )
         logger.info("Segmentation done.")
 
