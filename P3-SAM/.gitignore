@@ -211,5 +211,6 @@ __marimo__/
 
 results/
 weights/
+logs/
 .gradio/
 demo/segment_result.glb

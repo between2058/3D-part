@@ -48,16 +48,14 @@ services:
 
     volumes:
       # ── Model weight cache ────────────────────────────────────────────────
-      # All weights (P3-SAM safetensors + Sonata) now respect HF_HOME and
-      # land under /root/.cache/huggingface inside the container.
-      # Map this to wherever you keep model weights on the host, e.g.:
-      #   /pegaai/model_team/huggingface_cache  (shared with ReconViaGen)
-      #   ./weights/huggingface                 (local to this project)
-      - /pegaai/model_team/huggingface_cache:/root/.cache/huggingface:rw
+      # Configured via HF_CACHE_HOST_PATH in .env (copy from .env.example).
+      # Default fallback: ./weights/huggingface (local dev, auto-created).
+      - ${HF_CACHE_HOST_PATH:-./weights/huggingface}:/root/.cache/huggingface:rw
 
       # ── Log persistence ───────────────────────────────────────────────────
-      # Logs survive container restarts; rotated daily, kept 14 days.
-      - ./logs:/app/logs
+      # Configured via LOGS_HOST_PATH in .env.
+      # Default fallback: ./logs (same directory as docker-compose.yml).
+      - ${LOGS_HOST_PATH:-./logs}:/app/logs
 
       # ── Optional: expose outputs to the host ──────────────────────────────
       # Uncomment to access generated .glb files directly on the host.
