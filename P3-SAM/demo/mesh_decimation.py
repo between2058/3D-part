@@ -51,9 +51,10 @@ def _pymeshlab_to_trimesh(ms: pymeshlab.MeshSet) -> trimesh.Trimesh:
         ms.save_current_mesh(tmp_path)
         loaded = trimesh.load(tmp_path)
         if isinstance(loaded, trimesh.Scene):
-            combined = trimesh.Trimesh()
-            for geom in loaded.geometry.values():
-                combined = trimesh.util.concatenate([combined, geom])
+            parts = list(loaded.geometry.values())
+            combined = parts[0]
+            for p in parts[1:]:
+                combined = trimesh.util.concatenate([combined, p])
             return combined
         return loaded
     finally:
@@ -118,6 +119,7 @@ def transfer_labels(
         Per-face labels sized to original_mesh.faces, dtype int32.
     """
     t0 = time.time()
+    face_ids = np.asarray(face_ids, dtype=np.int32)
 
     # 1. KD-tree nearest-centroid transfer
     dec_centroids = decimated_mesh.triangles_center
