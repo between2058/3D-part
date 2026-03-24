@@ -175,6 +175,7 @@ import traceback
 import logging
 import logging.handlers
 import datetime
+from mesh_decimation import decimate_mesh, transfer_labels
 
 # Import AutoMask from the provided script
 try:
@@ -255,6 +256,9 @@ class SegmentResponse(BaseModel):
     request_id: str = Field(description="此次請求的 UUID")
     num_parts: int = Field(description="偵測到的零件數量（face label >= 0 的唯一 ID 數）")
     texture_preserved: bool = Field(description="True=輸入有 UV texture 且已保留；False=以隨機顏色區分各 part")
+    decimation_applied: bool = Field(default=False, description="True=mesh 面數超過 max_faces 自動降面")
+    original_faces: int | None = Field(default=None, description="降面前的原始面數（未降面時為 null）")
+    decimated_faces: int | None = Field(default=None, description="降面後的面數（未降面時為 null）")
 
 app = FastAPI(title="P3-SAM 3D Segmentation API")
 
@@ -403,6 +407,7 @@ async def segment_3d(
     clean_mesh: bool = Form(True, description="推論前是否清理 Mesh"),
     seed: int = Form(42, description="隨機種子，控制點雲取樣與 Prompt 選取的可重現性"),
     prompt_bs: int = Form(32, ge=1, le=400, description="Prompt 推理 batch size，越大越快但佔用更多 VRAM"),
+    max_faces: int = Form(100000, ge=10000, le=1000000, description="面數上限，超過自動降面再分割"),
 ):
     ext = os.path.splitext(file.filename or '')[1].lower()
     if ext not in SUPPORTED_MESH_EXTENSIONS:
@@ -445,7 +450,34 @@ async def segment_3d(
             effective_clean_mesh = False
             logger.info("Input mesh has UV texture — forcing clean_mesh=False to preserve UVs.")
 
-        # 3. 載入模型 (Load)
+        # ── Decimation (if needed) ───────────────────────────────────────
+        decimation_applied = False
+        original_faces_count = None
+        decimated_faces_count = None
+        inference_mesh = mesh  # default: run on original
+        export_mesh = None     # set after inference
+
+        num_faces = mesh.faces.shape[0]
+        if num_faces > max_faces:
+            logger.info(f"Mesh has {num_faces} faces (> {max_faces}), decimating...")
+            try:
+                inference_mesh = decimate_mesh(mesh, max_faces)
+                decimation_applied = True
+                original_faces_count = num_faces
+                decimated_faces_count = inference_mesh.faces.shape[0]
+            except Exception as dec_err:
+                logger.warning(
+                    f"Decimation failed ({type(dec_err).__name__}: {dec_err}), "
+                    f"falling back to original mesh."
+                )
+                inference_mesh = mesh
+
+        # When decimation is applied, cleaning would change face order
+        # and break the centroid-based label transfer mapping.
+        if decimation_applied:
+            effective_clean_mesh = False
+
+        # 3. Load model
         model = load_model_instance(
             point_num=point_num,
             prompt_num=prompt_num,
@@ -453,40 +485,45 @@ async def segment_3d(
             post_process=post_process,
         )
 
-        # 4. 執行預測 (Inference)
-        set_seed(seed)  # 全局設定隨機種子
+        # 4. Inference
+        set_seed(seed)
         logger.info("P3SAM model start segmentation.")
         aabb, face_ids, final_mesh = await run_in_threadpool(
             model.predict_aabb,
-            mesh,
+            inference_mesh,
             save_path=job_dir,
             save_mid_res=False,
             show_info=True,
             clean_mesh_flag=effective_clean_mesh,
             seed=seed,
             prompt_bs=prompt_bs,
-            is_parallel=False,  # DataParallel 在容器/K8s 環境 NCCL P2P 被封鎖會 hang 300s
+            is_parallel=False,
         )
         logger.info("Segmentation done.")
 
-        # 5. 依 face_ids 分割並匯出 GLB
+        # 5. Transfer labels back to original mesh if decimated
+        if decimation_applied:
+            face_ids = await run_in_threadpool(
+                transfer_labels, mesh, inference_mesh, face_ids
+            )
+            export_mesh = mesh  # export on original (preserves UV)
+        else:
+            export_mesh = final_mesh
+
+        # 6. Export GLB
         unique_ids = np.unique(face_ids)
         part_ids = [int(uid) for uid in unique_ids if uid >= 0]
         num_parts = len(part_ids)
 
         if has_texture:
-            # ── Texture 保留模式 ──────────────────────────────────────────
-            # final_mesh 是 clean_mesh=False 路徑下的原始 mesh（UV 完好），
-            # 對每個 part 用 submesh() 切出子網格，UV 座標跟著重新 index。
             scene = trimesh.Scene()
             for part_id in part_ids:
                 face_mask = np.where(face_ids == part_id)[0]
-                sub = final_mesh.submesh([face_mask], append=True)
+                sub = export_mesh.submesh([face_mask], append=True)
                 scene.add_geometry(sub, node_name=f"part_{part_id}")
             scene.export(output_glb_path)
             logger.info(f"Exported {num_parts} textured parts (UV preserved).")
         else:
-            # ── 無 texture：隨機顏色區分各 part ─────────────────────────
             rng = np.random.default_rng(seed)
             color_map = {
                 uid: rng.integers(30, 230, size=3, dtype=np.uint8)
@@ -496,7 +533,7 @@ async def segment_3d(
                 [color_map[fid] if fid >= 0 else [64, 64, 64] for fid in face_ids],
                 dtype=np.uint8,
             )
-            mesh_out = final_mesh.copy()
+            mesh_out = export_mesh.copy()
             mesh_out.visual.face_colors = face_colors
             mesh_out.export(output_glb_path)
             logger.info(f"Exported {num_parts} color-coded parts (no texture).")
@@ -506,6 +543,9 @@ async def segment_3d(
             "request_id": request_id,
             "num_parts": num_parts,
             "texture_preserved": has_texture,
+            "decimation_applied": decimation_applied,
+            "original_faces": original_faces_count,
+            "decimated_faces": decimated_faces_count,
         }
 
     except Exception as e:
